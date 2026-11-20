@@ -1,0 +1,22 @@
+# Build output
+/build/
+build*/
+cmake-build-*/
+
+# Generated shader bytecode (produced at build time when glslangValidator exists)
+/shaders/generated/*
+!/shaders/generated/.gitkeep
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Compiled artefacts
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.exe

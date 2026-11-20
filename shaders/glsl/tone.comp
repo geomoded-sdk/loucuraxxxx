@@ -1,0 +1,43 @@
+#version 450
+// LoucuraXXXX GPU - tone adjustment compute shader.
+//
+// Mirrors filters/builtin/tone_filter.cpp exactly: exposure in stops, contrast
+// around mid-grey, saturation blend, and an intensity-weighted lerp toward the
+// original. Keeping the maths identical is what lets tests compare the CPU and
+// GPU paths and expect the same result within a small tolerance.
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba8) uniform readonly image2D in_image;
+layout(set = 0, binding = 1, rgba8) uniform writeonly image2D out_image;
+
+// Push constants must match the C++ struct TonePushConstants.
+layout(push_constant) uniform PushConstants {
+    float exposure_stops;
+    float contrast;
+    float saturation;
+    float intensity;
+    vec2  image_size;
+    vec2  _pad;
+} pc;
+
+const vec3 kLumaWeights = vec3(0.2126, 0.7152, 0.0722);
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    if (coord.x >= int(pc.image_size.x) || coord.y >= int(pc.image_size.y)) return;
+
+    vec4 src = imageLoad(in_image, coord);
+    vec3 rgb = src.rgb * 255.0;
+
+    float gain = pow(2.0, pc.exposure_stops);
+    float contrast = 1.0 + pc.contrast;
+    rgb *= gain;
+    rgb = (rgb - 128.0) * contrast + 128.0;
+
+    float luma = dot(clamp(rgb, 0.0, 255.0), kLumaWeights);
+    rgb = vec3(luma) + (rgb - vec3(luma)) * pc.saturation;
+
+    vec3 blended = mix(src.rgb * 255.0, rgb, pc.intensity);
+    imageStore(out_image, coord, vec4(clamp(blended, 0.0, 255.0) / 255.0, src.a));
+}

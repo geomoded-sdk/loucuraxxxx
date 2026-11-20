@@ -1,0 +1,193 @@
+# Building
+
+## Requirements
+
+* CMake 3.16 or newer
+* A C++17 compiler (GCC 9+, Clang 10+, or MSVC 19.20+)
+* POSIX threads on Linux/macOS; the Windows build uses the native thread library
+
+There are **no mandatory third-party dependencies** and **no Python**. The
+optional pieces below are exactly that — optional.
+
+## Configure and build
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build -j
+```
+
+The build type defaults to `RelWithDebInfo` when none is given, which keeps
+assertions useful while still optimising.
+
+## Run the tests
+
+```sh
+ctest --test-dir build --output-on-failure
+```
+
+Each module has its own test executable under `build/bin/`, so a failure is
+attributable to a single module.
+
+### Sanitizers
+
+The shared scheduler, budget and buffer pool are exercised by many threads, so
+the suites are also run under the sanitizers:
+
+```sh
+# Address and undefined behaviour
+cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLX_SANITIZER=address
+cmake --build build-asan -j
+ctest --test-dir build-asan --output-on-failure
+
+# Data races
+cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLX_SANITIZER=thread
+cmake --build build-tsan -j
+setarch -R ctest --test-dir build-tsan --output-on-failure
+```
+
+`LX_SANITIZER` takes `address` or `thread` and rejects anything else at configure
+time. It exists so the matrix is reproducible from the configure line instead of
+depending on hand-copied flags: a sanitizer build that silently misses the
+instrumentation flag still runs and still passes, which is worse than not running
+it at all. `-DLX_SANITIZER=address` also enables the LeakSanitizer suppressions in
+`cmake/lsan.supp` for CTest.
+
+`setarch -R` disables ASLR for the process. ThreadSanitizer aborts on this
+kernel's default mapping layout with `unexpected memory mapping`, which is an
+environment limitation and not a finding about the code; disabling ASLR lets it
+run. If `setarch -R` is unavailable, run each test binary directly under the
+same wrapper.
+
+## Options
+
+| Option | Default | Meaning |
+|---|---|---|
+| `LX_ENABLE_VULKAN` | `OFF` | Build the optional Vulkan backend (needs the Vulkan loader/headers; uses shaderc for GLSL if present) |
+| `LX_BUILD_ICD` | `OFF` | Build the virtual adapter as a Vulkan ICD shared library. Requires `LX_ENABLE_VULKAN=ON`. The C headers are vendored in `third_party/vulkan`, so no Vulkan SDK is needed |
+| `LX_ENABLE_LINUX` | `ON` | Build the Linux integration |
+| `LX_ENABLE_WINDOWS` | `ON` | Build the Windows integration |
+| `LX_ENABLE_METAL` | `ON` | Build the Metal (macOS) integration |
+| `LX_BUILD_TESTS` | `ON` | Build the test suite |
+| `LX_BUILD_BENCHMARKS` | `ON` | Build the benchmark harness |
+| `LX_ENABLE_INSTALL` | `ON` | Generate install rules and CPack packages |
+
+### Why Vulkan is off by default
+
+The project's primary target machine does not support Vulkan. Rather than make
+the default build fail on such a machine, the CPU backend is the default and
+Vulkan is opt-in:
+
+```sh
+cmake -S . -B build -DLX_ENABLE_VULKAN=ON   # only where Vulkan exists
+```
+
+If Vulkan is requested but not found, configuration continues and reports that
+the backend was skipped.
+
+The Vulkan backend is the one real GPU path that needs an SDK: the Vulkan
+headers and loader (`libvulkan-dev` and a loader on Linux, the Vulkan SDK on
+Windows). If **shaderc** (`libshaderc-dev`) is also present, the backend compiles
+its built-in GLSL compute shaders to SPIR-V at run time; without shaderc it still
+builds and runs, but only with pre-compiled SPIR-V passed to `register_shader()`.
+
+## Shaders
+
+The GLSL sources in `shaders/glsl/` are real and are shipped as-is. They are
+compiled to SPIR-V during the build **only when `glslangValidator` is on the
+`PATH`**. When it is not, the build still succeeds and the shader library
+reports which modules have bytecode. The CPU backend does not need SPIR-V at
+all.
+
+## Platform notes
+
+### Linux
+Full functionality in user space. Hardware detection reads `/proc` and `sysfs`.
+The DRM integration opens no privileged device; it only probes `/dev/dri` and
+reports what it finds.
+
+### Windows
+Detection uses DXGI and the registry. The WDDM integration is a probe: creating
+a real display adapter requires a kernel-mode driver, which this project does
+not install.
+
+Build with MSVC (recommended) or with mingw-w64. A cross-build from Linux, which
+is how this repository exercises the Windows target, uses a toolchain file:
+
+```sh
+cmake -S . -B build-win \
+    -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/mingw-w64.cmake \
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build-win -j
+```
+
+Run the tests under Wine. The toolchain links the C++ runtime statically, so
+the `.exe` files need no companion DLLs:
+
+```sh
+cd build-win/bin
+for t in test_*.exe; do wine "$t"; done
+```
+
+## Packaging
+
+Install rules and packages are generated by CPack and are on by default
+(`-DLX_ENABLE_INSTALL=OFF` disables them). The installed tree is:
+
+```
+bin/                 lx_cli, lx_gui, lx_bench
+bin/shaders/         manifest.json + compiled/*.spv
+share/doc/LoucuraXXXX_GPU/   README and the documentation set
+```
+
+Stage an install into a prefix without packaging:
+
+```sh
+cmake --install build --prefix /tmp/lx-stage
+```
+
+### Windows installer
+
+On a Windows build, CPack produces a real NSIS installer alongside a ZIP:
+
+```sh
+cd build-win
+cpack -G NSIS     # LoucuraXXXX GPU-0.0.2-win64.exe
+cpack -G ZIP      # LoucuraXXXX GPU-0.0.2-win64.zip
+```
+
+The `.exe` is a full installer: it copies the executables, shaders and docs,
+creates Start Menu shortcuts for the GUI and the CLI, registers an uninstaller
+under Add/Remove Programs, and supports silent install and uninstall:
+
+```sh
+"LoucuraXXXX GPU-0.0.2-win64.exe" /S /D=C:\LoucuraXXXX     # silent install
+"C:\LoucuraXXXX\Uninstall.exe" /S                          # silent uninstall
+```
+
+It is verified in this repository by installing silently into a Wine prefix,
+running `lx_cli info` and `lx_gui --self-test` from the installed tree, then
+uninstalling. The installer is a complete NSIS package; only its own bootstrap
+(the small self-extractor that unpacks the payload) is a 32-bit executable,
+which is the NSIS default and runs on every x64 Windows through WoW64. The
+payload it installs — `lx_cli`, `lx_gui`, `lx_bench` — is 64-bit. Verifying the
+bootstrap under Wine therefore needs the 32-bit Wine libraries (`wine32:i386`);
+the 64-bit payload runs under plain `wine64`.
+
+### macOS
+Detection uses `sysctl` and Metal. Metal device enumeration is a probe. The
+project does not attempt to load an unauthorised kernel extension; the user-space
+path is the only path. Build with the Xcode command-line tools.
+
+macOS is **deferred** for 0.0.2: the sources are kept correct and compiling, but
+the active targets are Windows and Linux, and the macOS path has not been run on
+a Mac here.
+
+## Reproducing a benchmark
+
+```sh
+build/bin/lx_bench --width 640 --height 480 --iterations 30
+```
+
+The harness prints the host it ran on, the workload, and min/median/mean/p95/max
+per case. Compare the same workload on the same host; never compare numbers
+produced on different machines or at different resolutions.

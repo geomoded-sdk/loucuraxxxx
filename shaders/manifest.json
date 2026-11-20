@@ -1,0 +1,69 @@
+{
+  "version": "0.0.2",
+  "comment": "Shader manifest. Each entry is compiled to SPIR-V by glslangValidator when available. 'cpu_kernel' names the equivalent host kernel registered by the CPU backend, so a pass can run on either executor.",
+  "shaders": [
+    {
+      "name": "tone",
+      "stage": "compute",
+      "file": "glsl/tone.comp",
+      "entry_point": "main",
+      "cpu_kernel": "tone",
+      "push_constant_bytes": 32,
+      "maturity": "implemented"
+    },
+    {
+      "name": "gaussian_blur_h",
+      "stage": "compute",
+      "file": "glsl/gaussian_blur.comp",
+      "entry_point": "main",
+      "cpu_kernel": "blur_horizontal",
+      "push_constant_bytes": 32,
+      "maturity": "implemented"
+    },
+    {
+      "name": "gaussian_blur_v",
+      "stage": "compute",
+      "file": "glsl/gaussian_blur.comp",
+      "entry_point": "main",
+      "cpu_kernel": "blur_vertical",
+      "push_constant_bytes": 32,
+      "maturity": "implemented"
+    },
+    {
+      "name": "sharpen",
+      "stage": "compute",
+      "file": "glsl/sharpen.comp",
+      "entry_point": "main",
+      "cpu_kernel": "sharpen",
+      "push_constant_bytes": 24,
+      "maturity": "implemented"
+    },
+    {
+      "name": "vignette",
+      "stage": "compute",
+      "file": "glsl/vignette.comp",
+      "entry_point": "main",
+      "cpu_kernel": "vignette",
+      "push_constant_bytes": 32,
+      "maturity": "implemented"
+    },
+    {
+      "name": "fullscreen_quad",
+      "stage": "vertex",
+      "file": "glsl/fullscreen_quad.vert",
+      "entry_point": "main",
+      "cpu_kernel": "",
+      "push_constant_bytes": 0,
+      "maturity": "implemented"
+    },
+    {
+      "name": "composite",
+      "stage": "fragment",
+      "file": "glsl/composite.frag",
+      "entry_point": "main",
+      "cpu_kernel": "",
+      "push_constant_bytes": 0,
+      "maturity": "implemented"
+    }
+  ]
+}
