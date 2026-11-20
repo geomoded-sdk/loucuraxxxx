@@ -1,0 +1,31 @@
+# LeakSanitizer suppressions for the OpenGL/EGL backend probe.
+#
+# The probe makes a throwaway EGL context on a surfaceless Mesa display to
+# confirm a real OpenGL 3.3 core context exists. Mesa's software rasterizer
+# (llvmpipe) allocates a small amount of process-global state the first time
+# eglInitialize runs and keeps it for the life of the process; it is not ours to
+# free and eglReleaseThread does not release it. This is a known third-party
+# allocation, not a leak in the project, so it is suppressed here rather than
+# left to fail the sanitizer run.
+#
+# The probe itself (backends/opengl/gl_backend.cpp) tears down everything it
+# creates: the context, the display and the per-thread EGL state.
+leak:lx::backends::GlBackend::probe
+
+# Same story for the first draw: Mesa's llvmpipe caches a compiled shader variant
+# in process-global state on the first glDrawArrays. The backend deletes every GL
+# object it owns (programs, textures, FBOs, VAO, UBO) in its destructor; the
+# allocation below that is the driver's own cache, which it never frees.
+leak:lx::backends::GlBackend::Encoder::execute
+
+# The Vulkan backend (opt-in) hits the same class of third-party allocation. The
+# Vulkan loader and the software ICD (lavapipe / libvulkan_lvp.so) keep
+# process-global caches and per-driver state alive for the life of the process;
+# they are created lazily inside the driver on the first device, pipeline or
+# dispatch and are not ours to free. The backend destroys every object it owns
+# (images, memory, pipelines, layouts, pools, sampler, fence, device, instance)
+# in its destructor, so a leak reported here is the driver's, not the project's.
+# These are suppressed by module because the ICD ships stripped, with no symbols
+# for a function-name match.
+leak:libvulkan
+leak:libvulkan_lvp
