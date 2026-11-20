@@ -776,4 +776,22 @@ LX_TEST(gpu_backends, preferred_device_selects_or_falls_back_honestly) {
 #endif
 }
 
+LX_TEST(gpu_backends, compute_only_device_is_not_selected_for_rendering) {
+    // Regression: with this project's own ICD installed system-wide, the loader
+    // enumerated a compute-only device whose limits are all zero. The backend
+    // picked it (it had a compute queue) and then crashed building a pipeline
+    // layout the device rejects. Device selection must skip it instead.
+#if defined(LX_HAS_VULKAN)
+    backends::BackendCreateInfo info;
+    info.preferred = backends::BackendKind::Vulkan;
+    auto backend = backends::create_backend(info);
+    if (!backend.ok()) {
+        LX_CHECK(true);  // nothing usable on this host; the skip path is untested
+        return;
+    }
+    const std::string chosen = backend.value()->info().device_name;
+    LX_CHECK(chosen.find("LoucuraXXXX GPU (virtual") == std::string::npos);
+#endif
+}
+
 LX_TEST_MAIN("gpu_backends")

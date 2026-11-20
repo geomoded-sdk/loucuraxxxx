@@ -101,6 +101,12 @@ endif()
 # SPIR-V passed to register_shader().
 if(LX_ENABLE_VULKAN)
     find_package(Vulkan QUIET)
+    # With a real SDK, the loader path comes from FindVulkan. Without one it is
+    # discovered below. Both paths must end up setting LX_VULKAN_LOADER, because
+    # the ICD tests use it to decide whether to link their own loader probe.
+    if(Vulkan_FOUND AND Vulkan_LIBRARY)
+        set(LX_VULKAN_LOADER "${Vulkan_LIBRARY}")
+    endif()
     # A machine can have the loader but no -dev package (no libvulkan.so symlink,
     # no headers). The vendored headers plus a runtime-loaded loader make the
     # backend buildable there, so treat "headers available" as sufficient and

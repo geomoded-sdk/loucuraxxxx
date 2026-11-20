@@ -37,6 +37,21 @@ constexpr u32 kMaxInputs = 4;
 constexpr VkDeviceSize kPushConstantBytes = 64;
 constexpr VkDeviceSize kStagingBytes = 1 << 20;  // one page per staging buffer
 
+// Whether a device can run this backend's pipeline at all. A compute queue is
+// necessary but not sufficient: the pipeline needs push constants and two
+// sampled plus one storage descriptor. A compute-only device such as this
+// project's own ICD reports zero for every one of those, so it is enumerated
+// by the loader but cannot render. Both probe() and create() use this predicate
+// so the two can never disagree about which devices are usable.
+bool device_supports_pipeline(const VkPhysicalDeviceProperties& props) {
+    return props.limits.maxPushConstantsSize >= kPushConstantBytes &&
+           props.limits.maxPerStageDescriptorSamplers >= 2 &&
+           props.limits.maxPerStageDescriptorSampledImages >= 2 &&
+           props.limits.maxPerStageDescriptorStorageImages >= 1 &&
+           props.limits.maxDescriptorSetSamplers >= 2 &&
+           props.limits.maxSamplerAllocationCount >= 1;
+}
+
 // Compute pass shader: read the sampled input, write the storage image. The
 // per-shader body mirrors the CPU filter exactly, the same maths the GL and
 // D3D11 backends use, so all four executors agree.
@@ -584,8 +599,8 @@ VulkanBackend::VulkanBackend(const BackendCreateInfo& info) {
         return false;
     };
 
-    // Only devices with a compute queue are candidates, so the names offered to
-    // the selector are exactly the ones we could actually use.
+    // Only devices that can actually run this backend's pipeline are candidates,
+    // so the names offered to the selector are exactly the ones we could use.
     std::vector<std::string> usable_names;
     std::vector<std::pair<VkPhysicalDevice, u32>> usable;
     for (VkPhysicalDevice dev : devices) {
@@ -593,11 +608,16 @@ VulkanBackend::VulkanBackend(const BackendCreateInfo& info) {
         if (!find_compute_family(dev, &candidate)) continue;
         VkPhysicalDeviceProperties props{};
         vkGetPhysicalDeviceProperties(dev, &props);
+        if (!device_supports_pipeline(props)) {
+            LX_INFO << "Vulkan: skipping '" << props.deviceName
+                    << "' (limits too low for the render pipeline)";
+            continue;
+        }
         usable_names.emplace_back(props.deviceName);
         usable.emplace_back(dev, candidate);
     }
     if (usable.empty()) {
-        LX_WARN << "Vulkan: no compute-capable queue family";
+        LX_WARN << "Vulkan: no device supports the render pipeline";
         return;
     }
 
@@ -1326,6 +1346,10 @@ BackendProbeResult VulkanBackend::probe() {
         if (!has_compute) continue;
         VkPhysicalDeviceProperties dp{};
         vkGetPhysicalDeviceProperties(dev, &dp);
+        // Same predicate as create(): a device probe() calls usable must be one
+        // create() can actually open, or the two disagree and the caller gets a
+        // backend that fails after probe() promised it.
+        if (!device_supports_pipeline(dp)) continue;
         const bool device_is_hardware =
             dp.deviceType != VK_PHYSICAL_DEVICE_TYPE_CPU &&
             !looks_like_software_rasterizer(dp.deviceName) && !running_under_wine();

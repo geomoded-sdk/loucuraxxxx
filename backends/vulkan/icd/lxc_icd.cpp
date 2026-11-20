@@ -162,6 +162,8 @@ struct PhysicalDevice {
 struct Instance {
     VK_LOADER_DATA loader;
     PhysicalDevice* physical = nullptr;
+    // The version the application asked for, clamped to what is implemented.
+    uint32_t api_version = kApiVersion;
 };
 
 struct Fence {
@@ -248,14 +250,16 @@ VKAPI_ATTR VkResult VKAPI_CALL create_instance(const VkInstanceCreateInfo* creat
     const uint32_t requested = create_info->pApplicationInfo != nullptr
                                    ? create_info->pApplicationInfo->apiVersion
                                    : VK_API_VERSION_1_0;
-    // Refuse an API version this driver was not written against instead of
-    // accepting it and misbehaving later.
-    if (VK_VERSION_MAJOR(requested) > 1 ||
-        (VK_VERSION_MAJOR(requested) == 1 && VK_VERSION_MINOR(requested) > 1)) {
-        return VK_ERROR_INCOMPATIBLE_DRIVER;
-    }
+    // A Vulkan 1.0+ loader always asks for its own version, which is routinely
+    // newer than any single driver. Real ICDs clamp the request to the version
+    // they implement rather than refusing it, and the loader then exposes only
+    // that version's entry points. Refusing instead made vulkaninfo fail with
+    // VK_ERROR_INCOMPATIBLE_DRIVER.
+    if (VK_VERSION_MAJOR(requested) > 1) return VK_ERROR_INCOMPATIBLE_DRIVER;
     auto* instance = new Instance();
     set_loader_magic_value(&instance->loader);
+    instance->api_version =
+        VK_VERSION_MINOR(requested) >= VK_VERSION_MINOR(kApiVersion) ? kApiVersion : requested;
     instance->physical = new PhysicalDevice();
     set_loader_magic_value(&instance->physical->loader);
     *out = reinterpret_cast<VkInstance>(instance);

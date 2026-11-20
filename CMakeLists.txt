@@ -139,6 +139,51 @@ if(LX_ENABLE_INSTALL)
     install(TARGETS lx_cli lx_gui lx_bench
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
+    # The Vulkan ICD and its manifest. The loader finds an ICD by reading a JSON
+    # manifest from a fixed directory, so both halves have to land where the
+    # loader looks: the library in a lib dir, the manifest in the platform's
+    # ICD directory. Override LX_ICD_MANIFEST_DIR to install to a per-user
+    # location that does not need root.
+    if(TARGET lxc_icd)
+        if(WIN32)
+            set(LX_ICD_DEFAULT_DIR "${CMAKE_INSTALL_PREFIX}/bin")
+        elseif(APPLE)
+            set(LX_ICD_DEFAULT_DIR "${CMAKE_INSTALL_PREFIX}/share/vulkan/icd.d")
+        else()
+            set(LX_ICD_DEFAULT_DIR "${CMAKE_INSTALL_FULL_DATADIR}/vulkan/icd.d")
+        endif()
+        # Override only. The default is recomputed every configure, so changing
+        # CMAKE_INSTALL_PREFIX does not leave a stale cached directory behind.
+        set(LX_ICD_MANIFEST_DIR_OVERRIDE "" CACHE PATH
+            "Override the directory the Vulkan loader searches for ICD manifests")
+        if(LX_ICD_MANIFEST_DIR_OVERRIDE)
+            set(LX_ICD_MANIFEST_DIR "${LX_ICD_MANIFEST_DIR_OVERRIDE}")
+        else()
+            set(LX_ICD_MANIFEST_DIR "${LX_ICD_DEFAULT_DIR}")
+        endif()
+
+        install(TARGETS lxc_icd
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+        # The manifest must carry an absolute path: the loader ignores relative
+        # library_path values, and the manifest would silently never load.
+        set(LX_ICD_MANIFEST_CONTENT
+"{
+  \"file_format_version\": \"1.0.0\",
+  \"ICD\": {
+    \"library_path\": \"${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/$<TARGET_FILE_NAME:lxc_icd>\",
+    \"api_version\": \"1.1.0\"
+  }
+}
+")
+        file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/icd/loucuraxxxx_gpu.json"
+             CONTENT "${LX_ICD_MANIFEST_CONTENT}")
+        install(FILES "${CMAKE_BINARY_DIR}/icd/loucuraxxxx_gpu.json"
+            DESTINATION "${LX_ICD_MANIFEST_DIR}")
+        message(STATUS "  ICD install dir ... ${LX_ICD_MANIFEST_DIR}")
+    endif()
+
     install(DIRECTORY ${CMAKE_BINARY_DIR}/shaders/
         DESTINATION ${CMAKE_INSTALL_BINDIR}/shaders
         PATTERN "CMakeFiles" EXCLUDE
